@@ -63,31 +63,68 @@ class GeoNetworkCollector(object):
 
     @staticmethod
     def uuid_namer(url, **kwargs):
-
         root = etree.parse(url).getroot()
-
         x_res = root.xpath(
             '/gmd:MD_Metadata/gmd:fileIdentifier/gco:CharacterString',
-            namespaces=namespaces
-            )
-
+            namespaces=namespaces)
         uuid = "GeoNetwork-" + x_res[0].text + ".xml"
-
         return uuid
 
+
+
+    # TODO: change to not use static method
     @staticmethod
     def modifier(url, **kwargs):
         # translate ISO19139 to ISO19115
+        # base url from GeoNetwork ISO data
+        base_url = '/'.join(url.split('/')[:-1])
         gmi_ns = "http://www.isotc211.org/2005/gmi"
         etree.register_namespace("gmi",gmi_ns)
-
         new_root = etree.Element("{%s}MI_Metadata" % gmi_ns)
         old_root = etree.parse(url).getroot()
-
         # carry over an attributes we need
-        [new_root.set(k,v) for k,v in old_root.attrib.items()]
-        # carry over children
-        [new_root.append(e) for e in old_root]
+        for k, v in old_root.attrib.iteritems():
+            new_root.set(k,v)
+        for e in old_root:
+            new_root.append(e)
+        # GN UUID from ISO metadata
+        uuid = old_root.xpath(
+             '/gmd:MD_Metadata/gmd:fileIdentifier/gco:CharacterString',
+             namespaces=namespaces)[0].text
+        # TODO: Don't load this every time, consider saving as a instance
+        # variable instead of parsing the tree every time
+        gn_metadata_url = base_url + '/xml.search'
+        gn_metadata = etree.parse(gn_metadata_url)
+        # category information, mostly used for human readable names
+        category_info_url = base_url + '/xml.info?type=categories'
+        category_info = etree.parse(category_info_url)
+        gn_categories = gn_metadata.xpath("//uuid[text()='{}']/../category[not(@internal)]".format(uuid))
+        if gn_categories:
+            new_root.xpath('//gmd:MD_DataIdentification', namespaces=namespaces)
 
-        return etree.tostring(new_root, encoding="UTF-8", pretty_print=True, xml_declaration=True)
+            # append any GeoNetwork category IDs if present
+            keywords_res = new_root.xpath('//gmd:MD_Keywords', namespaces=namespaces)
+            # if keywords is not present, generate the element
+            if not keywords_res:
+                data_id = new_root.xpath('//gmd:MD_DataIdentification', namespaces=namespaces)[0]
+                desc_kw = etree.SubElement(data_id, "{http://www.isotc211.org/2005/gmd}descriptiveKeywords")
+                keywords = etree.SubElement(data_id, "{http://www.isotc211.org/2005/gmd}MD_Keywords")
+            else:
+                keywords = keywords_res[0]
+
+            # append any GeoNetwork categories the keywords element
+            for g_cat in gn_categories:
+                # find category in GeoNetwork catalog
+                cat = category_info.xpath("categories/category[name/text()='{}']/label/eng".format(g_cat.text))[0].text
+                kw_elem = etree.SubElement(keywords, "{http://www.isotc211.org/2005/gmd}keyword")
+                kw_str = etree.SubElement(kw_elem, "{http://www.isotc211.org/2005/gco}CharacterString")
+                # may not necessarily correspond to theme keywords
+                # <gmd:MD_KeywordTypeCode codeListValue="theme" codeList="http://standards.iso.org/ittf/PubliclyAvailableStandards/ISO_19139_Schemas/resources/Codelist/ML_gmxCodelists.xml#MD_KeywordTypeCode"/>"
+                kw_str.text = cat
+
+        # TODO: change lineage since we are changing the ISO file, so we should
+        # note modifications to history
+        return etree.tostring(new_root, encoding="UTF-8",
+                              pretty_print=True, xml_declaration=True)
+
 
