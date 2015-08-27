@@ -32,9 +32,12 @@ def set_date_stamp(fpath):
 
     for dateStamp in x_res:
 
-        #change the text value instead of deleting
-        dateTime = dateStamp.find('gco:DateTime', namespaces=namespaces)
-        # set to an ISO formatted date
+        # there should be only one - could be Date or dateTime - just delete it
+        for i in xrange(len(dateStamp)):
+            del dateStamp[i]
+
+        dateTime = etree.SubElement(dateStamp, '{http://www.isotc211.org/2005/gco}DateTime')
+
         dateTime.text = datetime.datetime.now().isoformat()
 
     root.write(fpath)
